@@ -108,6 +108,8 @@ var (
 	// stored. Normally it is the same as AppDataPath
 	AppDataPathStatic = PrefixStaticPath("/var/lib/nordvpn")
 
+	UsrBinPathStatic = PrefixStaticPath("/usr/bin")
+
 	DatFilesPath = filepath.Join(AppDataPath, "data")
 
 	DatFilesPathCommon = filepath.Join(AppDataPathCommon, "data")
@@ -129,9 +131,9 @@ var (
 	// DaemonPid defines daemon PID file location
 	DaemonPid = filepath.Join(RunDir, "/nordvpnd.pid")
 
-	FileshareBinaryPath = filepath.Join(AppDataPathStatic, Fileshare)
+	FileshareBinaryPath = filepath.Join(UsrBinPathStatic, Fileshare)
 
-	NorduserBinaryPath = filepath.Join(AppDataPathStatic, Norduserd)
+	NorduserBinaryPath = filepath.Join(UsrBinPathStatic, Norduserd)
 )
 
 func GetSupportedIPTables() []string {
@@ -172,6 +174,11 @@ func GetFilesharedPid(uid int) string {
 
 // GetConfigDirPath returns the directory used to store local user config and logs
 func GetConfigDirPath(homeDirectory string) (string, error) {
+	snapUserDataDir := os.Getenv("SNAP_USER_COMMON")
+	if snapUserDataDir != "" {
+		homeDirectory = snapUserDataDir
+	}
+
 	_, err := os.Stat(homeDirectory)
 	if homeDirectory == "" || os.IsNotExist(err) {
 		return "", errors.New("user does not have a home directory")
@@ -179,7 +186,7 @@ func GetConfigDirPath(homeDirectory string) (string, error) {
 
 	userConfigPath := filepath.Join(homeDirectory, ".config", "nordvpn")
 
-	if err := EnsureDir(userConfigPath); err != nil {
+	if err := EnsureDirFull(userConfigPath); err != nil {
 		return "", fmt.Errorf("ensuring config dir: %w", err)
 	}
 	return userConfigPath, nil

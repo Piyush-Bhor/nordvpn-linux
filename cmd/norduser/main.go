@@ -38,7 +38,7 @@ func openLogFile(path string) (*os.File, error) {
 	return logFile, nil
 }
 
-func addAutostart(userHomeDir string) (string, error) {
+func addAutostart() (string, error) {
 	autostartDesktopFileContents := "[Desktop Entry]" +
 		"\nName=NordVPN" +
 		"\nExec=nordvpn user" +
@@ -51,7 +51,8 @@ func addAutostart(userHomeDir string) (string, error) {
 		"\nComment=This is an autostart for NordVPN user daemon" +
 		"\nCategories=Utility;"
 
-	path := path.Join(userHomeDir, ".config", "autostart", "nordvpn.desktop")
+	dataDir := os.Getenv(snapconf.EnvSnapUserData)
+	path := path.Join(dataDir, ".config", "autostart", "nordvpn.desktop")
 	if err := internal.EnsureDir(path); err != nil {
 		return "", fmt.Errorf("ensuring path: %w", err)
 	}
@@ -60,12 +61,23 @@ func addAutostart(userHomeDir string) (string, error) {
 }
 
 func startTray(quitChan chan<- norduser.StopRequest) {
-	daemonURL := fmt.Sprintf("%s://%s", internal.Proto, internal.DaemonSocket)
-	if !systray.IsAvailable() {
-		log.Println("Session tray not available, exiting")
-		return
+	try := 0
+	// Retry checking systray availability, as it might not be availalble on startup.
+	for {
+		if systray.IsAvailable() {
+			break
+		}
+
+		if try == 5 {
+			log.Println("Session tray not available, exiting")
+			return
+		}
+
+		try++
+		<-time.After(10)
 	}
 
+	daemonURL := fmt.Sprintf("%s://%s", internal.Proto, internal.DaemonSocket)
 	conn, err := grpc.Dial(
 		daemonURL,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -145,7 +157,7 @@ func startSnap() {
 	}
 
 	// Always use real home dir here regardless of `$HOME` value
-	autostartFile, err := addAutostart(usr.HomeDir)
+	autostartFile, err := addAutostart()
 	if err != nil {
 		log.Println("Failed to add autostart: ", err)
 	}
@@ -195,7 +207,8 @@ func startSnap() {
 
 	go func() {
 		if err := grpcServer.Serve(limitedListener); err != nil {
-			log.Fatalln("failed to start accept on grpc server: ", err)
+			log.Println("failed to start accept on grpc server: ", err)
+			os.Exit(int(childprocess.CodeFailedToEnable))
 		}
 	}()
 
@@ -223,39 +236,28 @@ func startSnap() {
 	log.Println("Norduser process has stopped")
 }
 
-func isFork() bool {
-	if len(os.Args) > 1 {
-		if os.Args[1] == "fork" {
-			return true
-		}
-	}
-
-	return false
-}
-
 func start() {
 	listenerFunction := internal.SystemDListener
 
-	if isFork() {
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			log.Fatalln("failed to find home dir", err)
-		}
-
-		configDirPath, err := internal.GetConfigDirPath(homeDir)
-		if err == nil {
-			if logFile, err := openLogFile(filepath.Join(configDirPath, internal.NorduserLogFile)); err == nil {
-				log.SetOutput(logFile)
-				log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmicroseconds)
-			}
-		}
-
-		connURL := internal.GetNorduserSocketFork(os.Geteuid())
-		if err := os.Remove(connURL); err != nil && !errors.Is(err, os.ErrNotExist) {
-			log.Println("Failed to remove old socket file: ", err)
-		}
-		listenerFunction = internal.ManualListener(connURL, internal.PermUserRWX)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Println("failed to find home dir: ", err)
+		os.Exit(int(childprocess.CodeFailedToEnable))
 	}
+
+	configDirPath, err := internal.GetConfigDirPath(homeDir)
+	if err == nil {
+		if logFile, err := openLogFile(filepath.Join(configDirPath, internal.NorduserLogFile)); err == nil {
+			log.SetOutput(logFile)
+			log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmicroseconds)
+		}
+	}
+
+	connURL := internal.GetNorduserSocketFork(os.Geteuid())
+	if err := os.Remove(connURL); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Println("Failed to remove old socket file: ", err)
+	}
+	listenerFunction = internal.ManualListener(connURL, internal.PermUserRWX)
 
 	listener, err := listenerFunction()
 	if err != nil {
@@ -271,7 +273,8 @@ func start() {
 
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
-			log.Fatalln(internal.ErrorPrefix+"Failed to start accept on grpc server: ", err)
+			log.Println(internal.ErrorPrefix+"Failed to start accept on grpc server: ", err)
+			os.Exit(int(childprocess.CodeFailedToEnable))
 		}
 	}()
 

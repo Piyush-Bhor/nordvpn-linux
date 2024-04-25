@@ -388,7 +388,7 @@ func main() {
 	if snapconf.IsUnderSnap() {
 		norduserService = norduserservice.NewNorduserSnapService()
 	} else {
-		norduserService = norduserservice.NewNorduserService()
+		norduserService = norduserservice.NewChildProcessNorduser()
 	}
 
 	norduserClient := norduserservice.NewNorduserGRPCClient()
@@ -597,6 +597,7 @@ func snapChecker(publisherErr events.Publisher[error]) *snapconf.ConnChecker {
 			snapconf.InterfaceNetworkControl,
 			snapconf.InterfaceNetworkObserve,
 			snapconf.InterfaceFirewallControl,
+			snapconf.InterfaceHome,
 		},
 		[]snapconf.Interface{
 			snapconf.InterfaceNetwork,
@@ -604,7 +605,6 @@ func snapChecker(publisherErr events.Publisher[error]) *snapconf.ConnChecker {
 			snapconf.InterfaceNetworkControl,
 			snapconf.InterfaceNetworkObserve,
 			snapconf.InterfaceFirewallControl,
-			snapconf.InterfaceNorduserAutostart,
 			snapconf.InterfaceHome,
 		},
 		publisherErr,

@@ -177,15 +177,17 @@ func (ti *Instance) updateSettings() bool {
 
 func (ti *Instance) updateAccountInfo() bool {
 	changed := false
-	loggedIn := false
-	vpnActive := false
-	accountName := ""
+	loggedIn := ti.state.loggedIn
+	vpnActive := ti.state.vpnActive
+	accountName := ti.state.accountName
 
-	payload, err := ti.client.AccountInfo(context.Background(), &pb.Empty{})
+	payload, err := ti.accountInfo.getAccountInfo(ti.client)
 	if err != nil {
 		if status.Convert(err).Message() != internal.ErrNotLoggedIn.Error() {
 			log.Println(internal.ErrorPrefix+" Error retrieving account info: ", err)
+			return false
 		}
+		loggedIn = false
 	} else {
 		switch payload.Type {
 		case internal.CodeUnauthorized:
@@ -240,7 +242,10 @@ func (ti *Instance) maybeRedraw(result bool, previous bool) bool {
 	return result || previous
 }
 
-func (ti *Instance) pollingMonitor(ticker <-chan time.Time) {
+func (ti *Instance) pollingMonitor() {
+	ticker := time.NewTicker(PollingUpdateInterval)
+	defer ticker.Stop()
+
 	fullUpdate := true
 	fullUpdateLast := time.Time{}
 	for {
@@ -265,8 +270,8 @@ func (ti *Instance) pollingMonitor(ticker <-chan time.Time) {
 		case fullUpdate = <-ti.updateChan:
 		case <-systray.TrayOpenedCh:
 			fullUpdate = true
-		case ts := <-ticker:
-			if ts.Sub(fullUpdateLast) > PollingFullUpdateInterval {
+		case ts := <-ticker.C:
+			if ts.Sub(fullUpdateLast) >= PollingFullUpdateInterval {
 				fullUpdate = true
 			} else {
 				fullUpdate = false
